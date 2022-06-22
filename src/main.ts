@@ -1,8 +1,17 @@
+import { PuppeteerNodeLaunchOptions } from "puppeteer";
 import { Cluster } from "puppeteer-cluster";
 
 import { Options, ScreenshotParams } from "./types";
 import { makeScreenshot } from "./screenshot";
 import { Screenshot } from "./models/Screenshot";
+
+export async function launchCluster(puppeteerArgs : PuppeteerNodeLaunchOptions) {
+  return await Cluster.launch({
+    concurrency: Cluster.CONCURRENCY_CONTEXT,
+    maxConcurrency: 2,
+    puppeteerOptions: { ...puppeteerArgs, headless: true },
+  });
+}
 
 export async function nodeHtmlToImage(options: Options) {
   const {
@@ -15,13 +24,10 @@ export async function nodeHtmlToImage(options: Options) {
     type,
     quality,
     puppeteerArgs = {},
+    cluster = await launchCluster(puppeteerArgs),
+    autoClose = true,
+    exitOnErr = true
   } = options;
-
-  const cluster: Cluster<ScreenshotParams> = await Cluster.launch({
-    concurrency: Cluster.CONCURRENCY_CONTEXT,
-    maxConcurrency: 2,
-    puppeteerOptions: { ...puppeteerArgs, headless: true },
-  });
 
   const shouldBatch = Array.isArray(content);
   const contents = shouldBatch ? content : [{ ...content, output, selector }];
@@ -52,14 +58,23 @@ export async function nodeHtmlToImage(options: Options) {
       })
     );
     await cluster.idle();
-    await cluster.close();
+    if(autoClose) {
+      await cluster.close();
+    }
 
     return shouldBatch
       ? screenshots.map(({ buffer }) => buffer)
       : screenshots[0].buffer;
   } catch (err) {
-    console.error(err);
-    await cluster.close();
-    process.exit(1);
+    if(autoClose) {
+      await cluster.close();
+    }
+    
+    if(exitOnErr) {
+      console.error(err);
+      process.exit(1);
+    }
+
+    throw err
   }
 }
